@@ -11,8 +11,6 @@ import time
 import json
 from datetime import datetime, timedelta
 from functools import wraps
-import psycopg2
-import psycopg2.extras
 import re
 import sqlite3
 
