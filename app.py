@@ -16,6 +16,16 @@ import psycopg2.extras
 import re
 import sqlite3
 
+# psycopg2 (PostgreSQL driver) is optional. It requires the system libpq
+# library which is not available on all hosts (e.g. Render/Railway). When it
+# is missing, the app falls back to the built-in SQLite database.
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    print("⚠️  psycopg2 not available - PostgreSQL disabled, using SQLite")
+    psycopg2 = None
+
 # Fix Windows console encoding so emoji print statements don't crash startup
 import sys
 if hasattr(sys.stdout, 'reconfigure'):
@@ -126,6 +136,8 @@ DB_INIT_MESSAGE = ""
 
 def get_db():
     """Get database connection with proper error handling"""
+    if psycopg2 is None:
+        raise Exception("PostgreSQL driver (psycopg2) is not installed")
     if not is_valid_db:
         raise Exception(f"Database not configured: {db_validation_msg}")
     try:
@@ -1464,7 +1476,7 @@ ADMIN_HTML = '''
         
         // Convert 12hr to 24hr
         function convertTo24Hour(time12) {
-            const match = time12.match(/(\d+):(\d+)\s+(AM|PM)/i);
+            const match = time12.match(/(\\d+):(\\d+)\\s+(AM|PM)/i);
             if (!match) return time12;
             let hours = parseInt(match[1]);
             const minutes = match[2];
