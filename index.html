@@ -194,6 +194,41 @@ nav ul li a:hover {
   box-shadow: 0 10px 30px rgba(139, 92, 246, 0.4);
 }
 
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.nav-toggle span {
+  display: block;
+  height: 2px;
+  width: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+  border-radius: 2px;
+  transition: all 0.3s ease;
+}
+
+.nav-toggle.open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+
+.nav-toggle.open span:nth-child(2) {
+  opacity: 0;
+}
+
+.nav-toggle.open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
 /* Hero Section */
 .hero {
   min-height: 100vh;
@@ -1733,6 +1768,31 @@ footer .highlight {
 @media (max-width: 768px) {
   nav ul {
     display: none;
+    position: fixed;
+    top: 80px;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    background: rgba(10, 10, 15, 0.98);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+    padding: 24px 0 32px;
+    z-index: 1001;
+  }
+
+  nav ul.open {
+    display: flex;
+  }
+
+  nav ul li a {
+    font-size: 16px;
+    padding: 12px 0;
+  }
+
+  .nav-toggle {
+    display: flex;
   }
   
   .hero-title {
@@ -1795,6 +1855,11 @@ footer .highlight {
     <li><a href="#contact">Contact</a></li>
   </ul>
   <button class="nav-btn" onclick="openChat()">🤖Azan AI</button>
+  <button class="nav-toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
 </nav>
 
 <!-- Hero -->
@@ -2696,6 +2761,26 @@ document.querySelectorAll('nav a[href^="#"]').forEach(link => {
     }
   });
 });
+
+// Mobile menu toggle
+const navToggle = document.getElementById('navToggle');
+const navMenu = document.querySelector('nav ul');
+if (navToggle && navMenu) {
+  navToggle.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const isOpen = navMenu.classList.toggle('open');
+    navToggle.classList.toggle('open', isOpen);
+    navToggle.setAttribute('aria-expanded', isOpen);
+  });
+
+  navMenu.querySelectorAll('a').forEach(a => {
+    a.addEventListener('click', function() {
+      navMenu.classList.remove('open');
+      navToggle.classList.remove('open');
+      navToggle.setAttribute('aria-expanded', 'false');
+    });
+  });
+}
 
 // Generate stars
 const bgEffects = document.querySelector('.bg-effects');
