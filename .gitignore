@@ -1,0 +1,33 @@
+# Environment variables (secrets)
+.env
+
+# Local databases (contain private visitor data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Unrelated tutorial repo
+desktop-tutorial/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

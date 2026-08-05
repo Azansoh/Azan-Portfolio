@@ -1,0 +1,2123 @@
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, render_template_string, make_response
+from flask_cors import CORS
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+import requests
+import os
+import time
+import json
+from datetime import datetime, timedelta
+from functools import wraps
+import psycopg2
+import psycopg2.extras
+import re
+import sqlite3
+
+# Fix Windows console encoding so emoji print statements don't crash startup
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+app = Flask(__name__, static_folder='.')
+app.secret_key = os.environ.get('SECRET_KEY', 'jogi-portfolio-secret-key-xynova-2026')
+
+# Enable CORS for all routes
+CORS(app)
+
+# ==========================================
+# DATABASE CONFIGURATION & VALIDATION
+# ==========================================
+
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+
+# Validate DATABASE_URL format on startup
+def validate_database_url():
+    if not DATABASE_URL:
+        return False, "DATABASE_URL not set"
+    
+    # Check it starts with postgres:// or postgresql://
+    if not (DATABASE_URL.startswith('postgres://') or DATABASE_URL.startswith('postgresql://')):
+        return False, f"Invalid DATABASE_URL format. Must start with 'postgres://' or 'postgresql://', got: {DATABASE_URL[:20]}..."
+    
+    # Check it contains @ (has password/host)
+    if '@' not in DATABASE_URL:
+        return False, "Invalid DATABASE_URL - missing @ (should contain user:password@host)"
+    
+    return True, "Valid"
+
+is_valid_db, db_validation_msg = validate_database_url()
+
+# ==========================================
+# TELEGRAM BOT CONFIGURATION
+# ==========================================
+
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
+
+def send_telegram_message(message):
+    """Send message via Telegram Bot"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram not configured - set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+        return False
+    
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': message,
+            'parse_mode': 'HTML'
+        }
+        response = requests.post(url, json=data, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Telegram error: {e}")
+        return False
+
+# Email configuration
+SMTP_HOST = os.environ.get('SMTP_HOST', '')
+SMTP_PORT = int(os.environ.get('SMTP_PORT', '587') or 587)
+SMTP_EMAIL = os.environ.get('SMTP_EMAIL', '')
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', '')
+MAIL_TO = os.environ.get('MAIL_TO', '')
+
+def send_email(subject, body):
+    """Send an email via SMTP using environment configuration"""
+    mail_to = MAIL_TO or SMTP_EMAIL
+    if not (SMTP_HOST and SMTP_EMAIL and SMTP_PASSWORD and mail_to):
+        print("Email not configured - set SMTP_HOST, SMTP_EMAIL, SMTP_PASSWORD, MAIL_TO in .env")
+        return False
+    
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = mail_to
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+        print(f"✅ Email sent to {mail_to}")
+        return True
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False
+
+# Admin credentials - Replit secrets fix
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', '') or os.environ.get('ADMIN_USER', '')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '') or os.environ.get('ADMIN_PASS', '')
+
+# Database available flag - for graceful fallback
+DATABASE_AVAILABLE = False
+DB_INIT_MESSAGE = ""
+
+def get_db():
+    """Get database connection with proper error handling"""
+    if not is_valid_db:
+        raise Exception(f"Database not configured: {db_validation_msg}")
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except psycopg2.Error as e:
+        raise Exception(f"Database connection failed: {str(e)[:100]}")
+    except Exception as e:
+        raise Exception(f"Database error: {str(e)[:100]}")
+
+def verify_db_connection():
+    """Test database connection on startup"""
+    global DATABASE_AVAILABLE, DB_INIT_MESSAGE
+    try:
+        if not is_valid_db:
+            DATABASE_AVAILABLE = False
+            DB_INIT_MESSAGE = db_validation_msg
+            print(f"⚠️  Database: {DB_INIT_MESSAGE}")
+            return False
+            
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT 1')
+        c.close()
+        conn.close()
+        DATABASE_AVAILABLE = True
+        DB_INIT_MESSAGE = "Connected successfully"
+        print(f"✅ Database: Connected and ready")
+        return True
+    except Exception as e:
+        DATABASE_AVAILABLE = False
+        DB_INIT_MESSAGE = str(e)[:100]
+        print(f"❌ Database connection failed: {DB_INIT_MESSAGE}")
+        return False
+
+def init_db():
+    """Initialize database tables if they don't exist"""
+    if not is_valid_db:
+        print(f"⚠️  Database initialization skipped: {db_validation_msg}")
+        return False
+        
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Create meetings table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS meetings (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                date VARCHAR(50) NOT NULL,
+                time VARCHAR(50) NOT NULL,
+                topic TEXT,
+                status VARCHAR(50) DEFAULT 'scheduled',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create contacts table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS contacts (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                message TEXT,
+                date VARCHAR(50) NOT NULL,
+                time VARCHAR(50) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create availability table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS availability (
+                id SERIAL PRIMARY KEY,
+                setting_type VARCHAR(20) NOT NULL DEFAULT 'weekly',
+                day_of_week VARCHAR(10),
+                specific_date DATE,
+                time_slots TEXT NOT NULL DEFAULT '[]',
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Create settings table for timezone configuration
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                id SERIAL PRIMARY KEY,
+                setting_key VARCHAR(50) UNIQUE NOT NULL,
+                setting_value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Insert default availability if empty
+        c.execute('SELECT COUNT(*) FROM availability')
+        if c.fetchone()[0] == 0:
+            default_slots = '["23:00", "00:00", "01:00"]'
+            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            for day in days:
+                c.execute(
+                    'INSERT INTO availability (setting_type, day_of_week, time_slots) VALUES (%s, %s, %s)',
+                    ('daily', day, default_slots)
+                )
+        
+        c.execute("SELECT COUNT(*) FROM availability WHERE setting_type = 'weekly'")
+        if c.fetchone()[0] == 0:
+            c.execute(
+                'INSERT INTO availability (setting_type, time_slots) VALUES (%s, %s)',
+                ('weekly', '["23:00", "00:00", "01:00"]')
+            )
+        
+        c.execute('SELECT COUNT(*) FROM settings')
+        if c.fetchone()[0] == 0:
+            c.execute(
+                'INSERT INTO settings (setting_key, setting_value) VALUES (%s, %s)',
+                ('owner_timezone', 'Asia/Karachi')
+            )
+            c.execute(
+                'INSERT INTO settings (setting_key, setting_value) VALUES (%s, %s)',
+                ('availability_mode', 'daily')
+            )
+            c.execute(
+                'INSERT INTO availability (setting_type, time_slots, is_active) VALUES (%s, %s, %s)',
+                ('weekly', '["23:00", "00:00", "01:00"]', True)
+            )
+        
+        conn.commit()
+        c.close()
+        conn.close()
+        print("✅ Database tables initialized successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Database initialization failed: {e}")
+        return False
+
+# ==========================================
+# LOCAL SQLITE DATABASE
+# Used when PostgreSQL is not configured. Every contact message is stored
+# here so the admin panel always works and nothing is ever lost.
+# ==========================================
+SQLITE_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'contacts.db')
+
+def get_sqlite_db():
+    conn = sqlite3.connect(SQLITE_DB)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_sqlite_db():
+    """Create the SQLite contacts table if it doesn't exist."""
+    try:
+        conn = get_sqlite_db()
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                message TEXT,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL
+            )
+        ''')
+        conn.commit()
+        c.close()
+        conn.close()
+        print("✅ SQLite database ready (contacts.db)")
+        return True
+    except Exception as e:
+        print(f"❌ SQLite initialization failed: {e}")
+        return False
+
+def save_contact_sqlite(name, email, message):
+    """Save a contact message to the local SQLite database."""
+    now = datetime.now()
+    conn = get_sqlite_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO contacts (name, email, message, date, time) VALUES (?, ?, ?, ?, ?)',
+              (name, email, message, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')))
+    conn.commit()
+    c.close()
+    conn.close()
+
+def get_contacts_sqlite(days=10):
+    """Return contact messages from the last `days` days, newest first."""
+    cutoff = (datetime.now() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+    conn = get_sqlite_db()
+    c = conn.cursor()
+    c.execute('SELECT name, email, message, date, time FROM contacts WHERE date >= ? ORDER BY id DESC',
+              (cutoff,))
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+    return [dict(row) for row in rows]
+
+def import_legacy_contacts():
+    """Import entries previously saved to contact_messages.txt into SQLite."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'contact_messages.txt')
+    if not os.path.exists(path):
+        return 0
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        pattern = re.compile(
+            r'--- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})[^\n]* ---\nName: ([^\n]*)\nEmail: ([^\n]*)\nMessage: ((?:.|\n)*?)(?=\n--- |\Z)'
+        )
+        imported = 0
+        for m in pattern.finditer(content):
+            save_contact_sqlite(m.group(2).strip(), m.group(3).strip(), m.group(4).strip())
+            imported += 1
+        if imported:
+            print(f"✅ Imported {imported} legacy contact messages into SQLite")
+        return imported
+    except Exception as e:
+        print(f"❌ Legacy contact import failed: {e}")
+        return 0
+
+def check_startup_config():
+    """Check and display configuration status"""
+    print("\n" + "="*50)
+    print("🚀 PORTFOLIO STARTUP CONFIGURATION")
+    print("="*50)
+    
+    # Check GROQ_API_KEY
+    groq_key = os.environ.get('GROQ_API_KEY', '')
+    if groq_key:
+        print(f"✅ GROQ_API_KEY: Configured")
+    else:
+        print(f"❌ GROQ_API_KEY: Not set (Chatbot will not work)")
+    
+    # Check DATABASE_URL
+    if is_valid_db:
+        print(f"✅ DATABASE_URL: Valid format")
+    else:
+        print(f"❌ DATABASE_URL: {db_validation_msg}")
+    
+    # Check database connection
+    if DATABASE_AVAILABLE:
+        print(f"✅ Database: Connected and ready")
+    else:
+        print(f"⚠️  Database: {DB_INIT_MESSAGE}")
+    
+    # Check Telegram
+    telegram_token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    telegram_chat = os.environ.get('TELEGRAM_CHAT_ID', '')
+    if telegram_token and telegram_chat:
+        print(f"✅ TELEGRAM: Configured")
+    else:
+        print(f"⚠️  TELEGRAM: Not configured (Contact form notifications disabled)")
+    
+    print("="*50 + "\n")
+
+def clean_message(content):
+    if not content:
+        return ""
+    import re
+    content = str(content)
+    content = content.replace('\x00', '')
+    # Remove image URLs to prevent AI from trying to process them
+    content = re.sub(r'https?://[^\s]+\.(png|jpg|jpeg|gif|webp|svg)', '[IMAGE]', content, flags=re.IGNORECASE)
+    content = re.sub(r'data:image/[^\s]+', '[IMAGE]', content)
+    return content[:2000]
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('logged_in'):
+            return jsonify({'error': 'Not authenticated'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Default available slots
+AVAILABLE_SLOTS = {
+    "Monday": ["23:00", "00:00", "01:00"],
+    "Tuesday": ["23:00", "00:00", "01:00"],
+    "Wednesday": ["23:00", "00:00", "01:00"],
+    "Thursday": ["23:00", "00:00", "01:00"],
+    "Friday": ["23:00", "00:00", "01:00"],
+    "Saturday": ["23:00", "00:00", "01:00"],
+    "Sunday": ["23:00", "00:00", "01:00"]
+}
+
+def get_owner_timezone():
+    """Get the owner's timezone from settings"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT setting_value FROM settings WHERE setting_key = 'owner_timezone'")
+        result = c.fetchone()
+        c.close()
+        conn.close()
+        return result[0] if result else 'Asia/Karachi'
+    except:
+        return 'Asia/Karachi'
+
+def get_availability_mode():
+    """Get the availability mode (daily, weekly, monthly)"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT setting_value FROM settings WHERE setting_key = 'availability_mode'")
+        result = c.fetchone()
+        c.close()
+        conn.close()
+        return result[0] if result else 'daily'
+    except:
+        return 'daily'
+
+def get_available_slots(date_str):
+    """Get available slots for a specific date, considering the availability mode"""
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        day_name = date_obj.strftime('%A')
+        date_iso = date_obj.strftime('%Y-%m-%d')
+        
+        conn = get_db()
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        
+        # Check availability mode
+        mode = get_availability_mode()
+        
+        if mode == 'monthly':
+            # Check for monthly specific availability
+            c.execute("SELECT time_slots FROM availability WHERE setting_type = 'monthly' AND specific_date = %s AND is_active = TRUE", (date_iso,))
+            result = c.fetchone()
+            if result:
+                c.close()
+                conn.close()
+                return json.loads(result['time_slots'])
+        
+        if mode == 'weekly':
+            # Weekly mode - same slots every week
+            c.execute("SELECT time_slots FROM availability WHERE setting_type = 'weekly' AND is_active = TRUE LIMIT 1")
+            result = c.fetchone()
+            c.close()
+            conn.close()
+            if result:
+                return json.loads(result['time_slots'])
+            return []
+        
+        # Daily mode - check specific day
+        c.execute("SELECT time_slots FROM availability WHERE setting_type = 'daily' AND day_of_week = %s AND is_active = TRUE", (day_name,))
+        result = c.fetchone()
+        c.close()
+        conn.close()
+        
+        if result:
+            return json.loads(result['time_slots'])
+        return []
+    except Exception as e:
+        print(f"Error getting slots: {e}")
+        return AVAILABLE_SLOTS.get(day_name, [])
+
+def save_availability(setting_type, day_of_week=None, specific_date=None, time_slots=None, apply_to_all=False):
+    """Save availability settings"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        if setting_type == 'daily':
+            if apply_to_all:
+                # Apply same slots to all days of the week
+                days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                for day in days:
+                    c.execute('''
+                        UPDATE availability SET time_slots = %s, updated_at = NOW()
+                        WHERE setting_type = 'daily' AND day_of_week = %s
+                    ''', (json.dumps(time_slots), day))
+            else:
+                # Update or insert specific day
+                c.execute('''
+                    UPDATE availability SET time_slots = %s, updated_at = NOW()
+                    WHERE setting_type = 'daily' AND day_of_week = %s
+                ''', (json.dumps(time_slots), day_of_week))
+        
+        elif setting_type == 'weekly':
+            # Check if weekly entry exists
+            c.execute("SELECT id FROM availability WHERE setting_type = 'weekly' LIMIT 1")
+            if c.fetchone():
+                c.execute('''
+                    UPDATE availability SET time_slots = %s, updated_at = NOW()
+                    WHERE setting_type = 'weekly'
+                ''', (json.dumps(time_slots),))
+            else:
+                c.execute('''
+                    INSERT INTO availability (setting_type, time_slots, updated_at)
+                    VALUES (%s, %s, NOW())
+                ''', (setting_type, json.dumps(time_slots)))
+        
+        elif setting_type == 'monthly':
+            # Check if date entry exists
+            c.execute("SELECT id FROM availability WHERE setting_type = 'monthly' AND specific_date = %s", (specific_date,))
+            if c.fetchone():
+                c.execute('''
+                    UPDATE availability SET time_slots = %s, updated_at = NOW()
+                    WHERE setting_type = 'monthly' AND specific_date = %s
+                ''', (json.dumps(time_slots), specific_date))
+            else:
+                c.execute('''
+                    INSERT INTO availability (setting_type, specific_date, time_slots, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                ''', (setting_type, specific_date, json.dumps(time_slots)))
+        
+        conn.commit()
+        c.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error saving availability: {e}")
+        return False
+
+def get_all_availability():
+    """Get all availability settings"""
+    try:
+        conn = get_db()
+        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c.execute("SELECT * FROM availability ORDER BY day_of_week, specific_date")
+        rows = c.fetchall()
+        c.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except:
+        return []
+
+def save_setting(setting_key, setting_value):
+    """Save a setting"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO settings (setting_key, setting_value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (setting_key) DO UPDATE SET setting_value = %s, updated_at = NOW()
+        ''', (setting_key, setting_value, setting_value))
+        conn.commit()
+        c.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error saving setting: {e}")
+        return False
+
+def get_api_key():
+    api_key = os.environ.get('GROQ_API_KEY')
+    if not api_key:
+        raise Exception('GROQ_API_KEY not set in environment variables')
+    return api_key
+
+# Meeting functions using PostgreSQL
+def save_meeting(name, email, date, time, topic):
+    now = datetime.now()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO meetings (name, email, date, time, topic, status) VALUES (%s, %s, %s, %s, %s, %s)',
+              (name, email, date, time, topic, 'scheduled'))
+    conn.commit()
+    c.close()
+    conn.close()
+
+def get_meetings():
+    conn = get_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    c.execute('SELECT name, email, date, time, topic, status FROM meetings ORDER BY id DESC')
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+    return [dict(row) for row in rows]
+
+# Contact functions using PostgreSQL
+def save_contact(name, email, message):
+    now = datetime.now()
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('INSERT INTO contacts (name, email, message, date, time) VALUES (%s, %s, %s, %s, %s)',
+              (name, email, message, now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')))
+    conn.commit()
+    c.close()
+    conn.close()
+
+def get_contacts(days=None):
+    conn = get_db()
+    c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    if days:
+        cutoff = (datetime.now() - timedelta(days=days - 1)).strftime('%Y-%m-%d')
+        c.execute('SELECT name, email, message, date, time FROM contacts WHERE date >= %s ORDER BY id DESC', (cutoff,))
+    else:
+        c.execute('SELECT name, email, message, date, time FROM contacts ORDER BY id DESC')
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+    return [dict(row) for row in rows]
+
+# AZAN AI System Prompt
+SYSTEM_PROMPT = """You are AZAN AI, Muhammad Azan's personal AI assistant. You're friendly, witty, and genuinely helpful — like a cool tech friend who knows everything about Azan.
+
+ABOUT AZAN (Use these to impress visitors):
+- Full name: Muhammad Azan
+- Software Developer based in Lahore, Pakistan
+- Full-stack web developer who builds real, production-quality products
+- Strong in C++, Python, SQL, and the MERN stack (MongoDB, Express.js, React, Node.js)
+- Open to full-time roles, internships, and freelance projects
+
+SKILLS:
+- Python (automation, scripting, backend)
+- C++ (algorithms, data structures, OOP)
+- MERN Stack (MongoDB, Express.js, React.js, Node.js)
+- SQL (relational database design, queries, optimization)
+
+PROJECTS:
+- ShopHub: full-stack e-commerce & marketplace (Node.js, Express, MongoDB, Mongoose, EJS, Bootstrap 5, Passport.js, Cloudinary) — auth, product CRUD, cart, wishlist, reviews, orders, admin dashboard
+- WanderLust: Airbnb-inspired listing & review platform (Node.js, Express, MongoDB, EJS, Bootstrap, Cloudinary)
+- TaskFlow: realtime collaboration tool (MERN + Socket.io)
+- Python Automation Suite: file management & data processing scripts
+- C++ Algorithms Library: sorting & searching algorithms
+
+EXPERIENCE:
+- Python Developer Intern at Cosmicode (automation & scripting)
+- C++ Developer Intern at Interpeak (algorithms & data structures)
+
+YOUR RESPONSE STYLE:
+1. Friendly, confident, conversational — like a helpful tech friend
+2. Use emojis naturally
+3. Always sign with: - AZAN AI ✨
+4. Be concise but impactful
+5. Use **bold** for emphasis and ## headings for sections
+
+WHEN PEOPLE ASK:
+- About skills → give a short list of his stack
+- About projects → summarize ShopHub, WanderLust, TaskFlow, etc.
+- About hiring/freelancing → invite them to the Contact section or /book
+- About contact → email Azansohail687@gmail.com, phone +92 346 1433788, GitHub github.com/Azansoh, LinkedIn Muhammad Azan
+
+NEVER:
+- Pretend to be someone else or mention other people
+- Give exact pricing — suggest a quick chat instead
+
+ALWAYS:
+- Be genuinely helpful first
+- Answer confidently about Azan's skills and projects
+- End with a soft call-to-action (view his projects, or contact him)
+
+Example opener response:
+Hey there! 👋 I'm AZAN AI — Muhammad Azan's personal assistant. I can tell you all about his skills, projects, and experience!
+
+**What I can help with:**
+- Explaining Azan's skills (Python, C++, MERN, SQL)
+- Touring his best projects (ShopHub, WanderLust, TaskFlow)
+- Helping you reach him for a job, internship, or freelance work
+
+So — what brings you here today? Want to see his work, or looking to hire? 🎯
+
+- AZAN AI ✨"""
+
+# Booking API Routes
+@app.route('/api/slots', methods=['GET'])
+def get_slots():
+    if not DATABASE_AVAILABLE:
+        return jsonify({'error': 'Database not available', 'available': [], 'booked': [], 'owner_timezone': 'Asia/Karachi'}), 200
+    
+    date = request.args.get('date')
+    if not date:
+        return jsonify({'error': 'Date required'}), 400
+    
+    booked = []
+    try:
+        meetings = get_meetings()
+        booked = [m['time'] for m in meetings if m['date'] == date and m['status'] == 'scheduled']
+    except Exception as e:
+        print(f"Error getting booked slots: {e}")
+    
+    available = [s for s in get_available_slots(date) if s not in booked]
+    owner_tz = get_owner_timezone()
+    
+    return jsonify({
+        'date': date, 
+        'available': available, 
+        'booked': booked,
+        'owner_timezone': owner_tz
+    })
+
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint to verify database and API status"""
+    return jsonify({
+        'status': 'ok',
+        'database': {
+            'configured': is_valid_db,
+            'available': DATABASE_AVAILABLE,
+            'message': DB_INIT_MESSAGE
+        },
+        'api': {
+            'chatbot': bool(os.environ.get('GROQ_API_KEY', '')),
+            'telegram': bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+        }
+    })
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def api_settings():
+    """Get or save settings"""
+    if not DATABASE_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    if request.method == 'GET':
+        try:
+            conn = get_db()
+            c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            c.execute("SELECT * FROM settings")
+            rows = c.fetchall()
+            c.close()
+            conn.close()
+            settings = {row['setting_key']: row['setting_value'] for row in rows}
+            
+            # Also get availability
+            availability = get_all_availability()
+            
+            return jsonify({
+                'settings': settings,
+                'availability': availability
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    # POST - Save settings
+    try:
+        data = request.get_json()
+        
+        if 'owner_timezone' in data:
+            save_setting('owner_timezone', data['owner_timezone'])
+        
+        if 'availability_mode' in data:
+            save_setting('availability_mode', data['availability_mode'])
+        
+        if 'availability' in data:
+            for av in data['availability']:
+                save_availability(
+                    setting_type=av.get('setting_type', 'daily'),
+                    day_of_week=av.get('day_of_week'),
+                    specific_date=av.get('specific_date'),
+                    time_slots=av.get('time_slots', []),
+                    apply_to_all=av.get('apply_to_all', False)
+                )
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/book', methods=['POST'])
+def book_meeting():
+    if not DATABASE_AVAILABLE:
+        return jsonify({'success': False, 'error': 'Booking system temporarily unavailable. Database not connected.'}), 503
+    
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        email = data.get('email', '').strip()
+        date = data.get('date', '').strip()
+        time = data.get('time', '').strip()
+        topic = data.get('topic', '').strip()
+        
+        if not all([name, email, date, time]):
+            return jsonify({'success': False, 'error': 'All fields required'}), 400
+        
+        # Check if slot is already booked
+        meetings = get_meetings()
+        for m in meetings:
+            if m['date'] == date and m['time'] == time and m['status'] == 'scheduled':
+                return jsonify({'success': False, 'error': 'Slot already booked'}), 400
+        
+        save_meeting(name, email, date, time, topic or 'General Discussion')
+        
+        # Send Telegram notification
+        telegram_msg = f"📅 <b>New Meeting Booked!</b>\n\n👤 <b>Name:</b> {name}\n📧 <b>Email:</b> {email}\n📆 <b>Date:</b> {date}\n⏰ <b>Time:</b> {time}\n💼 <b>Topic:</b> {topic or 'General Discussion'}"
+        send_telegram_message(telegram_msg)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f'Booking error: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/meetings')
+def api_meetings():
+    if not DATABASE_AVAILABLE:
+        return jsonify([]), 200
+    
+    meetings = get_meetings()
+    response = jsonify(meetings)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    if request.method != 'POST':
+        return jsonify({'error': 'Method not allowed'}), 405
+    
+    try:
+        data = request.get_json()
+    except:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    
+    if not data:
+        return jsonify({'error': 'Empty request'}), 400
+    
+    messages = data.get('messages', [])
+    
+    if not messages or not isinstance(messages, list):
+        return jsonify({'error': 'Invalid request'}), 400
+    
+    try:
+        api_key = get_api_key()
+        cleaned_messages = []
+        for msg in messages[-6:]:
+            role = msg.get('role', 'user')
+            content = clean_message(msg.get('content', ''))
+            if content:
+                cleaned_messages.append({'role': role, 'content': content})
+        
+        formatted_messages = [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            *cleaned_messages
+        ]
+        
+        response = requests.post(
+            'https://api.groq.com/openai/v1/chat/completions',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'llama-3.1-8b-instant',
+                'messages': formatted_messages,
+                'temperature': 0.7,
+                'max_tokens': 350
+            },
+            timeout=30
+        )
+        
+        print(f"Groq API response: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f'Groq API error: {response.status_code} - {response.text}')
+            error_text = response.text
+            if 'image' in error_text.lower() or 'vision' in error_text.lower():
+                return jsonify({'message': 'I\'m a text-based assistant and can\'t process images. Could you describe your question in words? - AZAN AI ✨'}), 200
+            return jsonify({'error': f'AI service error: {error_text[:100]}'}), 500
+        
+        result = response.json()
+        
+        if 'choices' not in result or not result['choices']:
+            return jsonify({'error': 'Invalid AI response'}), 500
+        
+        assistant_message = result['choices'][0]['message']['content']
+        
+        if not assistant_message:
+            return jsonify({'error': 'Empty AI response'}), 500
+        
+        return jsonify({
+            'message': assistant_message
+        })
+        
+    except requests.exceptions.Timeout:
+        print('Request timeout')
+        return jsonify({'error': 'Request timed out. Please try again.'}), 500
+    except Exception as e:
+        print(f'Chat error: {e}')
+        return jsonify({'error': 'Failed to process request'}), 500
+
+@app.route('/api/contact', methods=['POST'])
+def contact():
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        email = data.get('email', '').strip()
+        message = data.get('message', '').strip()
+        
+        if not name or not email or not message:
+            return jsonify({'success': False, 'error': 'All fields are required'}), 400
+        
+        saved = False
+        if DATABASE_AVAILABLE:
+            try:
+                save_contact(name, email, message)
+                saved = True
+            except Exception as e:
+                print(f'Contact DB save error: {e}')
+        
+        # Always persist locally so the admin panel shows every message
+        if not saved:
+            try:
+                save_contact_sqlite(name, email, message)
+                saved = True
+                print("💾 Contact message saved to SQLite")
+            except Exception as e:
+                print(f'Contact SQLite save error: {e}')
+        
+        # Send email notification
+        subject = f"📬 New Contact Message from {name}"
+        body = f"Name: {name}\nEmail: {email}\n\nMessage:\n{message}"
+        email_sent = send_email(subject, body)
+        
+        # Send Telegram notification
+        telegram_msg = f"📬 <b>New Contact Message</b>\n\n👤 <b>Name:</b> {name}\n📧 <b>Email:</b> {email}\n💬 <b>Message:</b>\n{message}"
+        send_telegram_message(telegram_msg)
+        
+        return jsonify({'success': True, 'email_sent': email_sent, 'saved': saved})
+    except Exception as e:
+        print(f'Contact error: {e}')
+        return jsonify({'success': False, 'error': 'Failed to send message'}), 500
+
+ADMIN_HTML = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - AZAN AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #00f0ff;
+            --secondary: #ff00ff;
+            --dark: #0a0a0f;
+            --dark-card: #12121a;
+            --text: #ffffff;
+            --text-muted: #a0a0b0;
+            --border: rgba(255, 255, 255, 0.06);
+        }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: var(--dark);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: radial-gradient(ellipse at 30% 20%, rgba(0, 240, 255, 0.08) 0%, transparent 50%),
+                        radial-gradient(ellipse at 70% 80%, rgba(255, 0, 255, 0.05) 0%, transparent 50%);
+        }
+        .login-box {
+            background: var(--dark-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .login-logo h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .login-logo p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 18px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.15);
+        }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 10px;
+            color: var(--dark);
+            font-family: 'Outfit', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 240, 255, 0.3);
+        }
+        .error-msg {
+            color: #ff4444;
+            font-size: 0.85rem;
+            margin-top: 10px;
+            text-align: center;
+            display: none;
+        }
+        .error-msg.show {
+            display: block;
+        }
+        /* Dashboard */
+        .dashboard {
+            display: none;
+        }
+        .dashboard.active {
+            display: block;
+        }
+        .dashboard-header {
+            padding: 20px 40px;
+            background: var(--dark-card);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .dashboard-header h1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .logout-btn {
+            padding: 10px 20px;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.3s ease;
+        }
+        .logout-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .dashboard-content {
+            padding: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: var(--dark-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+        }
+        .stat-card h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+        .stat-card p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .contacts-section h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.3rem;
+            margin-bottom: 20px;
+            color: var(--text);
+        }
+        .contacts-table {
+            width: 100%;
+            background: var(--dark-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .contacts-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .contacts-table th {
+            padding: 16px 20px;
+            text-align: left;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            background: rgba(0, 240, 255, 0.05);
+            border-bottom: 1px solid var(--border);
+        }
+        .contacts-table td {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.95rem;
+        }
+        .contacts-table tr:last-child td {
+            border-bottom: none;
+        }
+        .contacts-table tr:hover td {
+            background: rgba(0, 240, 255, 0.03);
+        }
+        .message-cell {
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            color: var(--primary);
+        }
+        .message-cell:hover {
+            text-decoration: underline;
+        }
+        .date-cell {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .no-contacts {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-muted);
+        }
+        /* Message Modal */
+        .message-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .message-modal.show {
+            display: flex;
+        }
+        .message-modal-content {
+            background: var(--dark-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            max-width: 600px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 30px;
+        }
+        .message-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+        }
+        .message-modal-header h3 {
+            font-family: 'Space Grotesk', sans-serif;
+            color: var(--primary);
+            margin-bottom: 5px;
+        }
+        .message-modal-header p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .message-modal-close {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: all 0.3s ease;
+        }
+        .message-modal-close:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+        .message-modal-body {
+            color: var(--text);
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        @media (max-width: 768px) {
+            .dashboard-header {
+                padding: 15px 20px;
+            }
+            .dashboard-content {
+                padding: 20px;
+            }
+            .contacts-table {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Message Modal -->
+    <div class="message-modal" id="messageModal">
+        <div class="message-modal-content">
+            <div class="message-modal-header">
+                <div>
+                    <h3 id="modalName"></h3>
+                    <p id="modalEmail"></p>
+                    <p id="modalDate"></p>
+                </div>
+                <button class="message-modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="message-modal-body" id="modalMessage"></div>
+        </div>
+    </div>
+
+    <!-- Login -->
+    <div class="login-container" id="loginSection">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>AZAN AI Admin</h1>
+                <p>Portfolio Management</p>
+            </div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="username" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" required>
+                </div>
+                <button type="submit" class="login-btn">Login</button>
+                <p class="error-msg" id="errorMsg">Invalid username or password</p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboardSection">
+        <div class="dashboard-header">
+            <h1>AZAN AI Admin Panel</h1>
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+        <div class="dashboard-content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3 id="totalContacts">0</h3>
+                    <p>Messages (Last 10 Days)</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="todayContacts">0</h3>
+                    <p>Today's Messages</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="thisWeek">0</h3>
+                    <p>This Week</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="totalMeetings">0</h3>
+                    <p>Total Meetings</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="upcomingMeetings">0</h3>
+                    <p>Upcoming</p>
+                </div>
+            </div>
+            <div class="contacts-section">
+                <h2>Contact Messages <span style="font-size: 13px; font-weight: normal; color: #8f89b8;">(last 10 days)</span></h2>
+                <div class="contacts-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Message</th>
+                                <th>Date</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="contactsBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="no-contacts" id="noContacts" style="display: none;">
+                    No messages in the last 10 days
+                </div>
+            </div>
+
+            <div class="contacts-section" style="margin-top: 40px;">
+                <h2>Booked Meetings</h2>
+                <div class="contacts-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Topic</th>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="meetingsBody">
+                        </tbody>
+                    </table>
+                </div>
+                <div class="no-contacts" id="noMeetings" style="display: none;">
+                    No meetings scheduled
+                </div>
+            </div>
+
+            <!-- Availability Settings -->
+            <div class="contacts-section" style="margin-top: 40px;">
+                <h2>⚙️ Availability Settings</h2>
+                
+                <!-- Mode Selection -->
+                <div class="settings-card" style="background: var(--dark-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px;">
+                    <h3 style="font-size: 1rem; margin-bottom: 15px; color: var(--primary);">Availability Mode</h3>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="mode-btn active" data-mode="daily" onclick="setAvailabilityMode('daily')" style="padding: 10px 20px; background: rgba(0,240,255,0.1); border: 1px solid var(--primary); border-radius: 8px; color: var(--primary); cursor: pointer;">📅 Daily</button>
+                        <button class="mode-btn" data-mode="weekly" onclick="setAvailabilityMode('weekly')" style="padding: 10px 20px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); cursor: pointer;">📆 Weekly</button>
+                        <button class="mode-btn" data-mode="monthly" onclick="setAvailabilityMode('monthly')" style="padding: 10px 20px; background: transparent; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); cursor: pointer;">📆 Monthly</button>
+                    </div>
+                </div>
+
+                <!-- Timezone Setting -->
+                <div class="settings-card" style="background: var(--dark-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px;">
+                    <h3 style="font-size: 1rem; margin-bottom: 15px; color: var(--primary);">🌍 Your Timezone</h3>
+                    <select id="ownerTimezone" onchange="saveTimezone(this.value)" style="width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-family: 'Outfit', sans-serif; font-size: 1rem;">
+                        <option value="Asia/Karachi">🇵🇰 Pakistan (PKT) - UTC+5</option>
+                        <option value="America/New_York">🇺🇸 New York (EST) - UTC-5</option>
+                        <option value="America/Los_Angeles">🇺🇸 Los Angeles (PST) - UTC-8</option>
+                        <option value="Europe/London">🇬🇧 London (GMT) - UTC+0</option>
+                        <option value="Europe/Paris">🇪🇺 Paris (CET) - UTC+1</option>
+                        <option value="Asia/Dubai">🇦🇪 Dubai (GST) - UTC+4</option>
+                        <option value="Asia/Kolkata">🇮🇳 India (IST) - UTC+5:30</option>
+                        <option value="Asia/Singapore">🇸🇬 Singapore (SGT) - UTC+8</option>
+                        <option value="Asia/Tokyo">🇯🇵 Tokyo (JST) - UTC+9</option>
+                        <option value="Australia/Sydney">🇦🇺 Sydney (AEDT) - UTC+11</option>
+                    </select>
+                </div>
+
+                <!-- Daily Mode - Day Selector -->
+                <div id="dailyModePanel" class="settings-card" style="background: var(--dark-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px;">
+                    <h3 style="font-size: 1rem; margin-bottom: 15px; color: var(--primary);">🕐 Daily Availability</h3>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Select days and their time slots:</p>
+                    
+                    <!-- Day Selector -->
+                    <div style="margin-bottom: 20px;">
+                        <label style="color: var(--text-muted); font-size: 0.85rem;">Select Day:</label>
+                        <select id="selectedDay" onchange="loadDaySlots()" style="width: 100%; padding: 10px 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: 'Outfit', sans-serif; margin-top: 8px;">
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                            <option value="Sunday">Sunday</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Time Slots with AM/PM -->
+                    <div id="dailyTimeSlotsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px;">
+                    </div>
+                    
+                    <!-- Apply to All Button -->
+                    <button onclick="applyToAllDays()" style="margin-top: 15px; padding: 10px 20px; background: rgba(255,0,255,0.1); border: 1px solid var(--secondary); border-radius: 8px; color: var(--secondary); font-weight: 500; cursor: pointer;">✨ Apply to All Days</button>
+                    <button onclick="saveDailyAvailability()" style="margin-top: 15px; margin-left: 10px; padding: 10px 20px; background: linear-gradient(135deg, var(--primary), var(--secondary)); border: none; border-radius: 8px; color: var(--dark); font-weight: 600; cursor: pointer;">💾 Save This Day</button>
+                    <p id="saveStatus" style="margin-top: 10px; color: var(--primary); display: none;">✓ Saved successfully!</p>
+                </div>
+
+                <!-- Weekly Mode -->
+                <div id="weeklyModePanel" class="settings-card" style="display:none; background: var(--dark-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px;">
+                    <h3 style="font-size: 1rem; margin-bottom: 15px; color: var(--primary);">🕐 Weekly Availability</h3>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Same time slots for all days of the week:</p>
+                    
+                    <div id="weeklyTimeSlotsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px;">
+                    </div>
+                    
+                    <button onclick="saveWeeklyAvailability()" style="margin-top: 20px; padding: 12px 24px; background: linear-gradient(135deg, var(--primary), var(--secondary)); border: none; border-radius: 10px; color: var(--dark); font-weight: 600; cursor: pointer;">💾 Save Weekly Availability</button>
+                </div>
+
+                <!-- Monthly Mode -->
+                <div id="monthlyModePanel" class="settings-card" style="display:none; background: var(--dark-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 20px;">
+                    <h3 style="font-size: 1rem; margin-bottom: 15px; color: var(--primary);">🕐 Monthly Availability</h3>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 15px;">Same time slots for all dates in the month:</p>
+                    
+                    <div id="monthlyTimeSlotsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px;">
+                    </div>
+                    
+                    <button onclick="saveMonthlyAvailability()" style="margin-top: 20px; padding: 12px 24px; background: linear-gradient(135deg, var(--primary), var(--secondary)); border: none; border-radius: 10px; color: var(--dark); font-weight: 600; cursor: pointer;">💾 Save Monthly Availability</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Time slots in 24hr format for backend
+        const timeSlots24hr = ["23:00", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"];
+        
+        // Convert 24hr to 12hr AM/PM
+        function convertTo12Hour(time24) {
+            const [hours, minutes] = time24.split(':');
+            let h = parseInt(hours);
+            const m = minutes;
+            const period = h >= 12 ? 'PM' : 'AM';
+            if (h === 0) h = 12;
+            else if (h > 12) h -= 12;
+            return `${h}:${m} ${period}`;
+        }
+        
+        // Convert 12hr to 24hr
+        function convertTo24Hour(time12) {
+            const match = time12.match(/(\d+):(\d+)\s+(AM|PM)/i);
+            if (!match) return time12;
+            let hours = parseInt(match[1]);
+            const minutes = match[2];
+            const period = match[3].toUpperCase();
+            if (period === 'PM' && hours !== 12) hours += 12;
+            if (period === 'AM' && hours === 12) hours = 0;
+            return `${hours.toString().padStart(2, '0')}:${minutes}`;
+        }
+        
+        let currentMode = 'daily';
+        let dayAvailability = {}; // Store availability for each day
+        let weeklySlots = [];
+        let monthlySlots = [];
+        
+        function renderTimeSlots(containerId, selectedSlots) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            container.innerHTML = timeSlots24hr.map(time => {
+                const time12 = convertTo12Hour(time);
+                const isSelected = selectedSlots.includes(time);
+                return `
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 10px; background: ${isSelected ? 'rgba(0,240,255,0.15)' : 'rgba(255,255,255,0.03)'}; border: 1px solid ${isSelected ? 'var(--primary)' : 'var(--border)'}; border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                        <input type="checkbox" value="${time}" ${isSelected ? 'checked' : ''} class="time-slot-checkbox" style="width: 18px; height: 18px; accent-color: var(--primary);">
+                        <span style="color: ${isSelected ? 'var(--primary)' : 'var(--text)'}; font-size: 0.85rem; font-weight: ${isSelected ? '600' : '400'}">${time12}</span>
+                    </label>
+                `;
+            }).join('');
+        }
+        
+        function loadDaySlots() {
+            const day = document.getElementById('selectedDay').value;
+            renderTimeSlots('dailyTimeSlotsContainer', dayAvailability[day] || []);
+        }
+        
+        function loadSettings() {
+            console.log("Loading settings...");
+            fetch('/api/settings?_t=' + Date.now())
+                .then(res => {
+                    console.log("Settings response status:", res.status);
+                    return res.json();
+                })
+                .then(data => {
+                    console.log("Settings data:", data);
+                    
+                    // Check for error response
+                    if (data.error) {
+                        console.error("Error loading settings:", data.error);
+                        document.getElementById('saveStatus').textContent = 'Error: ' + data.error;
+                        document.getElementById('saveStatus').style.display = 'block';
+                        return;
+                    }
+                    
+                    if (data.settings) {
+                        if (data.settings.owner_timezone) {
+                            document.getElementById('ownerTimezone').value = data.settings.owner_timezone;
+                        }
+                        if (data.settings.availability_mode) {
+                            currentMode = data.settings.availability_mode;
+                            updateModeUI();
+                        }
+                    }
+                    
+                    // Load availability data - initialize with defaults if empty
+                    if (data.availability && data.availability.length > 0) {
+                        data.availability.forEach(av => {
+                            try {
+                                if (av.setting_type === 'daily' && av.day_of_week) {
+                                    dayAvailability[av.day_of_week] = JSON.parse(av.time_slots || '[]');
+                                } else if (av.setting_type === 'weekly') {
+                                    weeklySlots = JSON.parse(av.time_slots || '[]');
+                                } else if (av.setting_type === 'monthly') {
+                                    monthlySlots = JSON.parse(av.time_slots || '[]');
+                                }
+                            } catch (e) {
+                                console.error("Error parsing availability:", e);
+                            }
+                        });
+                    } else {
+                        // Initialize with default slots if no data
+                        console.log("No availability data, using defaults");
+                        const defaultSlots = ["23:00", "00:00", "01:00"];
+                        weeklySlots = defaultSlots;
+                        monthlySlots = defaultSlots;
+                        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].forEach(day => {
+                            dayAvailability[day] = defaultSlots;
+                        });
+                    }
+                    
+                    // Initialize UI
+                    loadDaySlots();
+                    renderTimeSlots('weeklyTimeSlotsContainer', weeklySlots);
+                    renderTimeSlots('monthlyTimeSlotsContainer', monthlySlots);
+                    console.log("Settings loaded successfully");
+                })
+                .catch(error => {
+                    console.error("Error loading settings:", error);
+                    document.getElementById('saveStatus').textContent = 'Error loading settings: ' + error.message;
+                    document.getElementById('saveStatus').style.display = 'block';
+                });
+        }
+        
+        function updateModeUI() {
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.style.background = 'transparent';
+                btn.style.borderColor = 'var(--border)';
+                btn.style.color = 'var(--text-muted)';
+                if (btn.dataset.mode === currentMode) {
+                    btn.classList.add('active');
+                    btn.style.background = 'rgba(0,240,255,0.1)';
+                    btn.style.borderColor = 'var(--primary)';
+                    btn.style.color = 'var(--primary)';
+                }
+            });
+            
+            document.getElementById('dailyModePanel').style.display = currentMode === 'daily' ? 'block' : 'none';
+            document.getElementById('weeklyModePanel').style.display = currentMode === 'weekly' ? 'block' : 'none';
+            document.getElementById('monthlyModePanel').style.display = currentMode === 'monthly' ? 'block' : 'none';
+        }
+        
+        async function setAvailabilityMode(mode) {
+            currentMode = mode;
+            updateModeUI();
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ availability_mode: mode })
+                });
+            } catch (e) {
+                console.error('Error saving mode:', e);
+            }
+        }
+        
+        async function saveDailyAvailability() {
+            const day = document.getElementById('selectedDay').value;
+            const selectedSlots = Array.from(document.querySelectorAll('#dailyTimeSlotsContainer .time-slot-checkbox:checked')).map(cb => cb.value);
+            dayAvailability[day] = selectedSlots;
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability_mode: 'daily',
+                        availability: [{
+                            setting_type: 'daily',
+                            day_of_week: day,
+                            time_slots: selectedSlots
+                        }]
+                    })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error saving daily availability:', e);
+            }
+        }
+        
+        async function applyToAllDays() {
+            const selectedSlots = Array.from(document.querySelectorAll('#dailyTimeSlotsContainer .time-slot-checkbox:checked')).map(cb => cb.value);
+            
+            // Apply to all days
+            const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            days.forEach(day => {
+                dayAvailability[day] = [...selectedSlots];
+            });
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability_mode: 'daily',
+                        availability: [{
+                            setting_type: 'daily',
+                            day_of_week: 'Monday',
+                            time_slots: selectedSlots,
+                            apply_to_all: true
+                        }]
+                    })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error applying to all days:', e);
+            }
+        }
+        
+        async function saveWeeklyAvailability() {
+            const selectedSlots = Array.from(document.querySelectorAll('#weeklyTimeSlotsContainer .time-slot-checkbox:checked')).map(cb => cb.value);
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability_mode: 'weekly',
+                        availability: [{
+                            setting_type: 'weekly',
+                            time_slots: selectedSlots
+                        }]
+                    })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error saving weekly availability:', e);
+            }
+        }
+        
+        async function saveMonthlyAvailability() {
+            const selectedSlots = Array.from(document.querySelectorAll('#monthlyTimeSlotsContainer .time-slot-checkbox:checked')).map(cb => cb.value);
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability_mode: 'monthly',
+                        availability: [{
+                            setting_type: 'monthly',
+                            time_slots: selectedSlots
+                        }]
+                    })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error saving monthly availability:', e);
+            }
+        }
+        
+        function showSaveStatus() {
+            const status = document.getElementById('saveStatus');
+            status.style.display = 'block';
+            status.textContent = '✓ Saved successfully!';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 3000);
+        }
+        
+        function checkAuth() {
+            const isLoggedIn = sessionStorage.getItem('adminLoggedIn');
+            if (isLoggedIn === 'true') {
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('dashboardSection').classList.add('active');
+                loadContacts();
+                loadMeetings();
+                loadSettings();
+            }
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('Form submitted');
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const btn = document.querySelector('.login-btn');
+            
+            btn.textContent = 'Logging in...';
+            btn.disabled = true;
+            
+            try {
+                console.log('Fetching /api/admin/login');
+                const response = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                if (response.ok && data.success) {
+                    sessionStorage.setItem('adminLoggedIn', 'true');
+                    document.getElementById('loginSection').style.display = 'none';
+                    document.getElementById('dashboardSection').classList.add('active');
+                    loadContacts();
+                    loadMeetings();
+                } else {
+                    document.getElementById('errorMsg').textContent = 'Invalid username or password';
+                    document.getElementById('errorMsg').classList.add('show');
+                    btn.textContent = 'Login';
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                document.getElementById('errorMsg').textContent = 'Connection error: ' + error.message;
+                document.getElementById('errorMsg').classList.add('show');
+                btn.textContent = 'Login';
+                btn.disabled = false;
+            }
+        });
+
+        function logout() {
+            sessionStorage.removeItem('adminLoggedIn');
+            document.getElementById('loginSection').style.display = 'flex';
+            document.getElementById('dashboardSection').classList.remove('active');
+        }
+
+        async function loadContacts() {
+            try {
+                const response = await fetch('/api/admin/contacts?_t=' + Date.now());
+                if (!response.ok) throw new Error('Failed to load contacts');
+                const contacts = await response.json();
+                
+                const tbody = document.getElementById('contactsBody');
+                const noContacts = document.getElementById('noContacts');
+                
+                if (!contacts || contacts.length === 0) {
+                    tbody.innerHTML = '';
+                    noContacts.style.display = 'block';
+                    return;
+                }
+                
+                noContacts.style.display = 'none';
+                tbody.innerHTML = contacts.map((c, index) => `
+                    <tr>
+                        <td>${c.name}</td>
+                        <td>${c.email}</td>
+                        <td class="message-cell" onclick="showMessageByIndex(${index})">${c.message.length > 50 ? c.message.substring(0, 50) + '...' : c.message}</td>
+                        <td class="date-cell">${c.date}</td>
+                        <td class="date-cell">${c.time}</td>
+                    </tr>
+                `).join('');
+                
+                window.contactsData = contacts;
+                
+                // Stats
+                const today = new Date().toISOString().split('T')[0];
+                const thisWeek = new Date();
+                thisWeek.setDate(thisWeek.getDate() - 7);
+                const weekAgo = thisWeek.toISOString().split('T')[0];
+                
+                document.getElementById('totalContacts').textContent = contacts.length;
+                document.getElementById('todayContacts').textContent = contacts.filter(c => c.date === today).length;
+                document.getElementById('thisWeek').textContent = contacts.filter(c => c.date >= weekAgo).length;
+            } catch (e) {
+                console.error('Error loading contacts:', e);
+            }
+        }
+
+        async function loadMeetings() {
+            try {
+                const response = await fetch('/api/admin/meetings?_t=' + Date.now());
+                if (!response.ok) throw new Error('Failed to load meetings');
+                const meetings = await response.json();
+                
+                const tbody = document.getElementById('meetingsBody');
+                const noMeetings = document.getElementById('noMeetings');
+                
+                if (!meetings || meetings.length === 0) {
+                    tbody.innerHTML = '';
+                    noMeetings.style.display = 'block';
+                    return;
+                }
+                
+                noMeetings.style.display = 'none';
+                tbody.innerHTML = meetings.map(m => `
+                    <tr>
+                        <td>${m.name}</td>
+                        <td>${m.email}</td>
+                        <td>${m.topic || '-'}</td>
+                        <td class="date-cell">${m.date}</td>
+                        <td class="date-cell">${m.time}</td>
+                        <td><span style="color: ${m.status === 'scheduled' ? 'var(--primary)' : 'var(--text-muted)'}">${m.status}</span></td>
+                    </tr>
+                `).join('');
+                
+                // Meeting stats
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('totalMeetings').textContent = meetings.length;
+                document.getElementById('upcomingMeetings').textContent = meetings.filter(m => m.date >= today).length;
+            } catch (e) {
+                console.error('Error loading meetings:', e);
+            }
+        }
+
+        checkAuth();
+
+        function showMessageByIndex(index) {
+            const c = window.contactsData[index];
+            if (!c) return;
+            document.getElementById('modalName').textContent = c.name;
+            document.getElementById('modalEmail').textContent = c.email;
+            document.getElementById('modalDate').textContent = c.date + ' at ' + c.time;
+            document.getElementById('modalMessage').textContent = c.message;
+            document.getElementById('messageModal').classList.add('show');
+        }
+
+        // Load settings and availability
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings?_t=' + Date.now());
+                const data = await response.json();
+                
+                if (data.settings) {
+                    // Set timezone
+                    if (data.settings.owner_timezone) {
+                        document.getElementById('ownerTimezone').value = data.settings.owner_timezone;
+                    }
+                    
+                    // Set availability mode
+                    if (data.settings.availability_mode) {
+                        document.querySelectorAll('.mode-btn').forEach(btn => {
+                            btn.classList.remove('active');
+                            btn.style.background = 'transparent';
+                            btn.style.borderColor = 'var(--border)';
+                            btn.style.color = 'var(--text-muted)';
+                            if (btn.dataset.mode === data.settings.availability_mode) {
+                                btn.classList.add('active');
+                                btn.style.background = 'rgba(0,240,255,0.1)';
+                                btn.style.borderColor = 'var(--primary)';
+                                btn.style.color = 'var(--primary)';
+                            }
+                        });
+                    }
+                }
+                
+                // Load time slots into container - use correct variable name
+                renderTimeSlotsForBooking();
+            } catch (e) {
+                console.error('Error loading settings:', e);
+                renderTimeSlotsForBooking();
+            }
+        }
+
+        // Renamed to avoid conflict - this is for booking page
+        function renderTimeSlotsForBooking() {
+            const container = document.getElementById('timeSlotsContainer');
+            if (!container) return;
+            
+            const timeSlots24hr = ["23:00", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00"];
+            container.innerHTML = timeSlots24hr.map(time => `
+                <label style="display: flex; align-items: center; gap: 8px; padding: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.2s;">
+                    <input type="checkbox" value="${time}" class="time-slot-checkbox" style="width: 18px; height: 18px; accent-color: var(--primary);">
+                    <span style="color: var(--text); font-size: 0.9rem;">${time}</span>
+                </label>
+            `).join('');
+        }
+
+        async function setAvailabilityMode(mode) {
+            // Update UI
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.style.background = 'transparent';
+                btn.style.borderColor = 'var(--border)';
+                btn.style.color = 'var(--text-muted)';
+            });
+            event.target.classList.add('active');
+            event.target.style.background = 'rgba(0,240,255,0.1)';
+            event.target.style.borderColor = 'var(--primary)';
+            event.target.style.color = 'var(--primary)';
+            
+            // Save to server
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ availability_mode: mode })
+                });
+            } catch (e) {
+                console.error('Error saving mode:', e);
+            }
+        }
+
+        async function saveTimezone(tz) {
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ owner_timezone: tz })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error saving timezone:', e);
+            }
+        }
+
+        async function saveAvailability() {
+            const selectedSlots = Array.from(document.querySelectorAll('.time-slot-checkbox:checked')).map(cb => cb.value);
+            
+            // Get current mode
+            const activeMode = document.querySelector('.mode-btn.active');
+            const mode = activeMode ? activeMode.dataset.mode : 'daily';
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability_mode: mode,
+                        availability: [{
+                            setting_type: mode,
+                            time_slots: selectedSlots
+                        }]
+                    })
+                });
+                showSaveStatus();
+            } catch (e) {
+                console.error('Error saving availability:', e);
+            }
+        }
+
+        function showSaveStatus() {
+            const status = document.getElementById('saveStatus');
+            status.style.display = 'block';
+            status.textContent = '✓ Saved successfully!';
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 3000);
+        }
+
+        function closeModal() {
+            document.getElementById('messageModal').classList.remove('show');
+        }
+
+        document.getElementById('messageModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
+'''
+
+@app.route('/admin')
+def admin():
+    response = make_response(render_template_string(ADMIN_HTML))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    print("Login attempt received")
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            session['logged_in'] = True
+            print("Login successful!")
+            return jsonify({'success': True})
+        print("Login failed - invalid credentials")
+        return jsonify({'success': False}), 401
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/contacts')
+@login_required
+def admin_contacts():
+    days = request.args.get('days', 10, type=int) or 10
+    try:
+        print(f"Loading contacts, session: {session.get('logged_in')}")
+        if DATABASE_AVAILABLE:
+            contacts = get_contacts(days=days)
+        else:
+            contacts = get_contacts_sqlite(days=days)
+        print(f"Found {len(contacts)} contacts")
+        response = jsonify(contacts)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        return response
+    except Exception as e:
+        print(f"Admin contacts error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/meetings')
+@login_required
+def admin_meetings():
+    if not DATABASE_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        print(f"Loading meetings, session: {session.get('logged_in')}")
+        meetings = get_meetings()
+        print(f"Found {len(meetings)} meetings")
+        response = jsonify(meetings)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        return response
+    except Exception as e:
+        print(f"Admin meetings error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/logout')
+def admin_logout():
+    session.pop('logged_in', None)
+    return jsonify({'success': True})
+
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/chatbot')
+def chatbot():
+    return send_from_directory('.', 'chatbot.html')
+
+@app.route('/book')
+def booking():
+    return send_from_directory('.', 'book.html')
+
+@app.route('/JogiWorld')
+def jogiworld():
+    return send_from_directory('.', 'jogiworld.html')
+
+@app.route('/<path:filename>')
+def serve_static(filename):
+    if filename.endswith('.mp3'):
+        return send_from_directory('.', filename, mimetype='audio/mpeg')
+    return send_from_directory('.', filename)
+
+# ==========================================
+# STARTUP INITIALIZATION (Works with gunicorn)
+# ==========================================
+
+def initialize_app():
+    """Initialize app - runs both with python app.py AND gunicorn"""
+    print("\n" + "="*50)
+    print("🚀 INITIALIZING PORTFOLIO")
+    print("="*50)
+    
+    # Verify database connection
+    verify_db_connection()
+    
+    # Initialize database tables if connected
+    if DATABASE_AVAILABLE:
+        init_db()
+    
+    # Always initialize the local SQLite database so the admin panel works
+    init_sqlite_db()
+    import_legacy_contacts()
+    
+    # Show config status
+    check_startup_config()
+    
+    print("="*50 + "\n")
+
+# Run initialization at module load (works with gunicorn)
+initialize_app()
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    host = '0.0.0.0'
+    print(f'\n✅ Flask server starting on {host}:{port}')
+    print(f'📋 Admin panel: http://localhost:{port}/admin')
+    app.run(host=host, port=port, debug=False)
