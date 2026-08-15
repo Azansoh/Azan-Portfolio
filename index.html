@@ -2141,6 +2141,16 @@ footer .highlight {
       <h3>SQL</h3>
       <p>Relational database design, advanced queries & data optimization</p>
     </div>
+    <div class="skill-card">
+      <span class="skill-icon">🍃</span>
+      <h3>MongoDB</h3>
+      <p>NoSQL schema design, Mongoose ODM, aggregation pipelines & data modeling</p>
+    </div>
+    <div class="skill-card">
+      <span class="skill-icon">🤖</span>
+      <h3>Generative AI</h3>
+      <p>LLMs, LangChain, RAG pipelines, prompt engineering & structured information extraction</p>
+    </div>
   </div>
 </section>
 
@@ -2321,6 +2331,52 @@ footer .highlight {
         </div>
         <div class="project-links">
           <a href="https://github.com/Azansoh" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generative AI -->
+  <div class="project-category">
+    <div class="category-header">
+      <span class="category-icon">🤖</span>
+      <h3 class="category-title">Generative AI</h3>
+      <span class="category-line"></span>
+    </div>
+
+    <div class="featured-grid">
+      <div class="project-featured">
+        <span class="featured-badge">🎬 LLM Extraction</span>
+        <span class="project-icon">🎬</span>
+        <h3>CineStage — Movie Info Extractor</h3>
+        <p>A Generative AI-powered Movie Information Extractor built with LangChain, Mistral AI, Pydantic & Streamlit. Paste any unstructured paragraph about a movie and it extracts the title, release year, genre, director, cast, rating & summary into structured data.</p>
+        <div class="project-tags">
+          <span class="project-tag">LangChain</span>
+          <span class="project-tag">Mistral AI</span>
+          <span class="project-tag">Pydantic</span>
+          <span class="project-tag">Streamlit</span>
+          <span class="project-tag">Prompt Engineering</span>
+        </div>
+        <div class="project-links">
+          <a href="https://github.com/Azansoh/Movie-Extractor-GenAI" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+        </div>
+      </div>
+
+      <div class="project-featured violet">
+        <span class="featured-badge">📚 RAG</span>
+        <span class="project-icon">📄</span>
+        <h3>PDF RAG Assistant</h3>
+        <p>A Retrieval-Augmented Generation application that lets you upload PDFs and ask questions about their content. Uses Mistral AI for answers, Sentence Transformers for embeddings, and ChromaDB for semantic retrieval — with an interactive Streamlit chat interface.</p>
+        <div class="project-tags">
+          <span class="project-tag">RAG</span>
+          <span class="project-tag">LangChain</span>
+          <span class="project-tag">Mistral AI</span>
+          <span class="project-tag">ChromaDB</span>
+          <span class="project-tag">Sentence Transformers</span>
+          <span class="project-tag">Streamlit</span>
+        </div>
+        <div class="project-links">
+          <a href="https://github.com/Azansoh/Pdf-Rag-Assistant" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
         </div>
       </div>
     </div>
@@ -2618,12 +2674,12 @@ const azanKnowledge = [
     reply: "Hey there! 👋 Great to see you. I'm Azan AI — ask me about Azan's skills, projects, experience, or how to reach him! - AZAN AI ✨"
   },
   {
-    keywords: ['skill', 'stack', 'tech', 'technolog', 'python', 'c++', 'cpp', 'mern', 'react', 'node', 'javascript', 'sql', 'mobile', 'react native', 'bootstrap', 'mongodb', 'express'],
-    reply: "**Azan's Tech Stack:**\n🐍 **Python** — automation & backend scripting\n⚙️ **C++** — algorithms, data structures & OOP\n🌐 **MERN Stack** — MongoDB, Express.js, React.js, Node.js\n🗄️ **SQL** — relational databases\n\nWhich one would you like to know more about? - AZAN AI ✨"
+    keywords: ['skill', 'stack', 'tech', 'technolog', 'python', 'c++', 'cpp', 'mern', 'react', 'node', 'javascript', 'sql', 'mobile', 'react native', 'bootstrap', 'mongodb', 'express', 'generative ai', 'genai', 'llm', 'langchain', 'rag'],
+    reply: "**Azan's Tech Stack:**\n🐍 **Python** — automation & backend scripting\n⚙️ **C++** — algorithms, data structures & OOP\n🌐 **MERN Stack** — MongoDB, Express.js, React.js, Node.js\n🗄️ **SQL** — relational databases\n🍃 **MongoDB** — NoSQL schema design & Mongoose\n🤖 **Generative AI** — LLMs, LangChain, RAG & prompt engineering\n\nWhich one would you like to know more about? - AZAN AI ✨"
   },
   {
-    keywords: ['project', 'work', 'built', 'portfolio', 'shop', 'wander', 'task', 'shophub', 'wanderlust', 'taskflow'],
-    reply: "**Azan's Projects:**\n🛍️ **ShopHub** — full-stack e-commerce marketplace (Node.js, Express, MongoDB, EJS)\n🏡 **WanderLust** — Airbnb-inspired listing & review platform\n🗂️ **TaskFlow** — realtime collaboration tool (MERN + Socket.io)\n🤖 **Python Automation Suite**\n🧮 **C++ Algorithms Library**\n\nScroll to the Projects section for live demos! - AZAN AI ✨"
+    keywords: ['project', 'work', 'built', 'portfolio', 'shop', 'wander', 'task', 'shophub', 'wanderlust', 'taskflow', 'cine', 'cinestage', 'movie', 'pdf', 'rag'],
+    reply: "**Azan's Projects:**\n🛍️ **ShopHub** — full-stack e-commerce marketplace (Node.js, Express, MongoDB, EJS)\n🏡 **WanderLust** — Airbnb-inspired listing & review platform\n🗂️ **TaskFlow** — realtime collaboration tool (MERN + Socket.io)\n🎬 **CineStage** — GenAI movie info extractor (LangChain, Mistral AI, Pydantic, Streamlit)\n📄 **PDF RAG Assistant** — RAG Q&A over PDFs (LangChain, ChromaDB, Mistral AI)\n🤖 **Python Automation Suite**\n🧮 **C++ Algorithms Library**\n\nScroll to the Projects section for live demos & GitHub links! - AZAN AI ✨"
   },
   {
     keywords: ['experience', 'intern', 'job', 'cosmicode', 'interpeak', 'background', 'worked', 'work for'],
