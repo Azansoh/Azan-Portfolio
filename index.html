@@ -1044,6 +1044,16 @@ section {
   box-shadow: 0 6px 20px rgba(96, 165, 250, 0.25);
 }
 
+.category-icon.ml {
+  background: linear-gradient(135deg, #22c55e, #6366f1);
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.25);
+}
+
+.category-icon.dl {
+  background: linear-gradient(135deg, #ec4899, #8b5cf6);
+  box-shadow: 0 6px 20px rgba(236, 72, 153, 0.25);
+}
+
 .category-title {
   font-family: 'Poppins', sans-serif;
   font-size: 24px;
@@ -2093,7 +2103,7 @@ footer .highlight {
   <div class="about-grid">
     <div>
       <p class="about-text">Hi! I'm <span class="highlight">Muhammad Azan</span>, a passionate software developer based in Lahore, Pakistan. I thrive on turning complex problems into elegant, efficient solutions.</p>
-      <p class="about-text">My expertise spans <span class="highlight">C++, Python, SQL</span>, and the <span class="highlight">MERN Stack</span> — giving me the versatility to build everything from performance-critical algorithms to full-stack web applications.</p>
+      <p class="about-text">My expertise spans <span class="highlight">C++, Python, SQL</span>, and the <span class="highlight">MERN Stack</span> — along with <span class="highlight">Machine Learning, Deep Learning &amp; Generative AI</span> — giving me the versatility to build everything from intelligent AI models to full-stack web applications.</p>
       <p class="about-text">I've had the privilege of gaining real-world experience through internships where I built automation tools and contributed to software projects under professional mentorship.</p>
       <p class="about-text">I believe great software isn't just functional — it's clean, scalable, and built with purpose. I focus on writing maintainable code, following best practices, and shipping products that actually solve problems.</p>
       <p class="about-text">Beyond coding, I'm a <span class="highlight">fast learner and a problem-solver at heart</span>. I love breaking down tough challenges, researching the best approach, and continuously improving my craft with every project I build.</p>
@@ -2105,6 +2115,8 @@ footer .highlight {
         <li>Strong foundation in algorithms & data structures</li>
         <li>Real internship experience in Python & C++</li>
         <li>Full-stack versatility across the MERN Stack</li>
+        <li>Machine Learning & Deep Learning model building (NLP, RNN, LSTM, GRU)</li>
+        <li>Generative AI — LLMs, RAG pipelines & prompt engineering</li>
         <li>Clean code advocate & continuous learner</li>
         <li>Collaborative team player & fast adapter</li>
         <li>Proven ability to deliver under deadlines</li>
@@ -2130,6 +2142,16 @@ footer .highlight {
       <span class="skill-icon">🐍</span>
       <h3>Python</h3>
       <p>Backend automation, scripting, data processing & task management</p>
+    </div>
+    <div class="skill-card">
+      <span class="skill-icon">📊</span>
+      <h3>Machine Learning</h3>
+      <p>Scikit-Learn, Pandas & NumPy — classification, regression, NLP, pipelines & hyperparameter tuning</p>
+    </div>
+    <div class="skill-card">
+      <span class="skill-icon">🧠</span>
+      <h3>Deep Learning</h3>
+      <p>TensorFlow & Keras — RNN, LSTM, GRU & BiGRU neural networks for NLP and text generation</p>
     </div>
     <div class="skill-card">
       <span class="skill-icon">🌐</span>
@@ -2287,51 +2309,102 @@ footer .highlight {
     </div>
   </div>
 
-  <!-- Python -->
+  <!-- Machine Learning -->
   <div class="project-category">
     <div class="category-header">
-      <span class="category-icon python">🐍</span>
-      <h3 class="category-title">Python</h3>
+      <span class="category-icon ml">📊</span>
+      <h3 class="category-title">Machine Learning</h3>
       <span class="category-line"></span>
     </div>
-    <div class="projects-grid single">
-      <div class="project-card">
-        <span class="project-icon">🤖</span>
-        <h3>Python Automation Suite</h3>
-        <p>A collection of robust automation scripts for file management, data processing and workflow optimization.</p>
+
+    <div class="featured-grid">
+      <div class="project-featured">
+        <span class="featured-badge">🎭 NLP</span>
+        <span class="project-icon">🎭</span>
+        <h3>Emotion Detection System</h3>
+        <p>An end-to-end NLP pipeline that classifies human text emotions by training, tuning, and comparing Multinomial Naive Bayes, SVM, and Logistic Regression. Hyperparameter optimization with GridSearchCV, flexible text vectorization with CountVectorizer & TfidfVectorizer, model comparison, and a real-time Streamlit web app — Logistic Regression crowned the winner with 89.28% accuracy.</p>
         <div class="project-tags">
           <span class="project-tag">Python</span>
-          <span class="project-tag">Automation</span>
-          <span class="project-tag">Scripting</span>
-          <span class="project-tag">CLI Tools</span>
+          <span class="project-tag">Scikit-Learn</span>
+          <span class="project-tag">NLP</span>
+          <span class="project-tag">GridSearchCV</span>
+          <span class="project-tag">Pandas</span>
+          <span class="project-tag">NumPy</span>
+          <span class="project-tag">Streamlit</span>
         </div>
         <div class="project-links">
-          <a href="https://github.com/Azansoh" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+          <a href="https://lnkd.in/ddp29a8R" target="_blank" rel="noopener" class="btn btn-primary">🚀 Live Demo</a>
+          <a href="https://lnkd.in/dgq-8HP6" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+        </div>
+      </div>
+
+      <div class="project-featured violet">
+        <span class="featured-badge">📈 Regression</span>
+        <span class="project-icon">📊</span>
+        <h3>Student Social Media & Mental Health Prediction</h3>
+        <p>A complete ML workflow — EDA, data cleaning, missing-value & duplicate handling, numerical & categorical feature analysis, skewness analysis, feature encoding (Ordinal & One-Hot), scaling, ColumnTransformer & Pipelines. Compared Linear Regression and Random Forest with RandomizedSearchCV tuning — the optimized Random Forest achieved an R² score of 0.8652 and MAE of 0.3688.</p>
+        <div class="project-tags">
+          <span class="project-tag">Python</span>
+          <span class="project-tag">Pandas</span>
+          <span class="project-tag">NumPy</span>
+          <span class="project-tag">Matplotlib</span>
+          <span class="project-tag">Seaborn</span>
+          <span class="project-tag">Scikit-Learn</span>
+          <span class="project-tag">Random Forest</span>
+        </div>
+        <div class="project-links">
+          <a href="https://lnkd.in/drU-VDDz" target="_blank" rel="noopener" class="btn btn-primary">🚀 Live Demo</a>
+          <a href="https://lnkd.in/dZwkVNGn" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- C++ -->
+  <!-- Deep Learning -->
   <div class="project-category">
     <div class="category-header">
-      <span class="category-icon cpp">⚙️</span>
-      <h3 class="category-title">C++</h3>
+      <span class="category-icon dl">🧠</span>
+      <h3 class="category-title">Deep Learning</h3>
       <span class="category-line"></span>
     </div>
-    <div class="projects-grid single">
-      <div class="project-card">
-        <span class="project-icon">🧮</span>
-        <h3>C++ Algorithms Library</h3>
-        <p>Custom implementations of core sorting and searching algorithms with performance benchmarks.</p>
+
+    <div class="featured-grid">
+      <div class="project-featured">
+        <span class="featured-badge">🎭 NLP</span>
+        <span class="project-icon">🧠</span>
+        <h3>Deep Learning Emotion Detection Web App</h3>
+        <p>Rebuilt the Machine Learning emotion detection project with Deep Learning by comparing four sequential neural network architectures — SimpleRNN, LSTM, GRU, and Bidirectional GRU. Text tokenization & padding, class weight balancing, EarlyStopping, probability-based predictions with confidence scores, a FastAPI backend, and a Streamlit app for real-time inference.</p>
         <div class="project-tags">
-          <span class="project-tag">C++</span>
-          <span class="project-tag">Data Structures</span>
-          <span class="project-tag">Algorithms</span>
-          <span class="project-tag">OOP</span>
+          <span class="project-tag">TensorFlow</span>
+          <span class="project-tag">Keras</span>
+          <span class="project-tag">LSTM</span>
+          <span class="project-tag">GRU</span>
+          <span class="project-tag">RNN</span>
+          <span class="project-tag">BiGRU</span>
+          <span class="project-tag">FastAPI</span>
+          <span class="project-tag">Streamlit</span>
         </div>
         <div class="project-links">
-          <a href="https://github.com/Azansoh" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+          <a href="https://lnkd.in/diq8wjQg" target="_blank" rel="noopener" class="btn btn-primary">🚀 Live Demo</a>
+          <a href="https://lnkd.in/dkASFmTd" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
+        </div>
+      </div>
+
+      <div class="project-featured violet">
+        <span class="featured-badge">✍️ Text Generation</span>
+        <span class="project-icon">✍️</span>
+        <h3>LSTM & RNN Next-Word Prediction</h3>
+        <p>A complete sequence-to-sequence text generation pipeline built from scratch using a custom quote dataset. Data preprocessing with tokenization and n-gram sequences, sequence padding, an Embedding + LSTM/RNN + Dense(softmax) architecture trained with sparse categorical cross entropy — plus a robust text generation inference script for custom seed text.</p>
+        <div class="project-tags">
+          <span class="project-tag">Python</span>
+          <span class="project-tag">TensorFlow</span>
+          <span class="project-tag">Keras</span>
+          <span class="project-tag">LSTM</span>
+          <span class="project-tag">RNN</span>
+          <span class="project-tag">NLP</span>
+        </div>
+        <div class="project-links">
+          <a href="https://lnkd.in/dJ5tFP4n" target="_blank" rel="noopener" class="btn btn-outline">💻 GitHub</a>
         </div>
       </div>
     </div>
@@ -2712,12 +2785,12 @@ const azanKnowledge = [
     reply: "Hey there! 👋 Great to see you. I'm Azan AI — ask me about Azan's skills, projects, experience, or how to reach him! - AZAN AI ✨"
   },
   {
-    keywords: ['skill', 'stack', 'tech', 'technolog', 'python', 'c++', 'cpp', 'mern', 'react', 'node', 'javascript', 'sql', 'mobile', 'react native', 'bootstrap', 'mongodb', 'express', 'generative ai', 'genai', 'llm', 'langchain', 'rag'],
-    reply: "**Azan's Tech Stack:**\n🐍 **Python** — automation & backend scripting\n⚙️ **C++** — algorithms, data structures & OOP\n🌐 **MERN Stack** — MongoDB, Express.js, React.js, Node.js\n🗄️ **SQL** — relational databases\n🍃 **MongoDB** — NoSQL schema design & Mongoose\n🤖 **Generative AI** — LLMs, LangChain, RAG & prompt engineering\n\nWhich one would you like to know more about? - AZAN AI ✨"
+    keywords: ['skill', 'stack', 'tech', 'technolog', 'python', 'c++', 'cpp', 'mern', 'react', 'node', 'javascript', 'sql', 'mobile', 'react native', 'bootstrap', 'mongodb', 'express', 'generative ai', 'genai', 'llm', 'langchain', 'rag', 'machine learning', 'ml', 'deep learning', 'dl', 'tensorflow', 'keras', 'lstm', 'gru', 'rnn', 'bi gru', 'scikit', 'sklearn', 'neural network', 'pandas', 'numpy'],
+    reply: "**Azan's Tech Stack:**\n🐍 **Python** — automation & backend scripting\n⚙️ **C++** — algorithms, data structures & OOP\n🌐 **MERN Stack** — MongoDB, Express.js, React.js, Node.js\n🗄️ **SQL** — relational databases\n🍃 **MongoDB** — NoSQL schema design & Mongoose\n📊 **Machine Learning** — Scikit-Learn, NLP, classification & regression, pipelines, hyperparameter tuning\n🧠 **Deep Learning** — TensorFlow, Keras, RNN/LSTM/GRU & BiGRU for NLP & text generation\n🤖 **Generative AI** — LLMs, LangChain, RAG & prompt engineering\n\nWhich one would you like to know more about? - AZAN AI ✨"
   },
   {
-    keywords: ['project', 'work', 'built', 'portfolio', 'shop', 'wander', 'learn', 'shophub', 'wanderlust', 'learnmind', 'cine', 'cinestage', 'movie', 'pdf', 'rag', 'multi', 'agent', 'deep', 'research', 'research', 'city', 'weather', 'news', 'quiz', 'course', 'study'],
-    reply: "**Azan's Projects:**\n🛍️ **ShopHub** — full-stack e-commerce marketplace (Node.js, Express, MongoDB, EJS)\n🏡 **WanderLust** — Airbnb-inspired listing & review platform\n🧠 **LearnMind AI** — AI-powered learning platform with courses, AI tutor, quizzes & study planner (React, Node.js, Express, MongoDB, Mistral AI)\n🔬 **Multi-Agent Deep Research** — multi-agent AI research assistant (LangChain, Streamlit)\n🏙️ **City Intelligence Agent** — AI city assistant with weather & news (LangChain, Mistral AI, Streamlit)\n🎬 **CineStage** — GenAI movie info extractor (LangChain, Mistral AI, Pydantic, Streamlit)\n📄 **PDF RAG Assistant** — RAG Q&A over PDFs (LangChain, ChromaDB, Mistral AI)\n🤖 **Python Automation Suite**\n🧮 **C++ Algorithms Library**\n\nScroll to the Projects section for live demos & GitHub links! - AZAN AI ✨"
+    keywords: ['project', 'work', 'built', 'portfolio', 'shop', 'wander', 'learn', 'shophub', 'wanderlust', 'learnmind', 'cine', 'cinestage', 'movie', 'pdf', 'rag', 'multi', 'agent', 'deep', 'research', 'research', 'city', 'weather', 'news', 'quiz', 'course', 'study', 'emotion', 'mental', 'health', 'next-word', 'next word', 'text generation', 'prediction', 'naive bayes', 'logistic', 'svm', 'gru', 'bilstm'],
+    reply: "**Azan's Projects:**\n🛍️ **ShopHub** — full-stack e-commerce marketplace (Node.js, Express, MongoDB, EJS)\n🏡 **WanderLust** — Airbnb-inspired listing & review platform\n🧠 **LearnMind AI** — AI-powered learning platform with courses, AI tutor, quizzes & study planner (React, Node.js, Express, MongoDB, Mistral AI)\n🎭 **Emotion Detection (ML)** — NLP classification comparing Naive Bayes, SVM & Logistic Regression (89.28% accuracy, Streamlit)\n📊 **Student Mental Health Prediction (ML)** — Random Forest regression with R² 0.8652 & MAE 0.3688\n🧠 **Deep Learning Emotion Detection** — RNN/LSTM/GRU/BiGRU comparison with FastAPI & Streamlit\n✍️ **LSTM & RNN Next-Word Prediction** — sequence-to-sequence text generation from a quote dataset\n🔬 **Multi-Agent Deep Research** — multi-agent AI research assistant (LangChain, Streamlit)\n🏙️ **City Intelligence Agent** — AI city assistant with weather & news (LangChain, Mistral AI, Streamlit)\n🎬 **CineStage** — GenAI movie info extractor (LangChain, Mistral AI, Pydantic, Streamlit)\n📄 **PDF RAG Assistant** — RAG Q&A over PDFs (LangChain, ChromaDB, Mistral AI)\n\nScroll to the Projects section for live demos & GitHub links! - AZAN AI ✨"
   },
   {
     keywords: ['experience', 'intern', 'job', 'cosmicode', 'interpeak', 'background', 'worked', 'work for'],
