@@ -664,6 +664,7 @@ PROJECTS:
 - LSTM & RNN Next-Word Prediction: sequence-to-sequence text generation pipeline on a custom quote dataset — tokenization, n-gram sequences, padding, Embedding + LSTM/RNN + Dense softmax trained with sparse categorical cross entropy (TensorFlow, Keras, Python)
 
 EXPERIENCE:
+- AI & Machine Learning Intern at Big Brains (Remote, Aug 2026 – Sep 2026): hands-on AI/ML tasks, 98% average program score, 83% on a timed internal assessment, earned Certificate of Completion and Letter of Recommendation from the Founder
 - Python Developer Intern at Cosmicode (automation & scripting)
 - C++ Developer Intern at Interpeak (algorithms & data structures)
 
