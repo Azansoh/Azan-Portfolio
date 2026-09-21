@@ -4,7 +4,7 @@ A stunning **neon-themed AI-powered portfolio** with embedded JOGI chatbot. Perf
 
 ---
 
-<div align="center">
+<div  align="center">
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat&logo=python)
 ![Flask](https://img.shields.io/badge/Flask-2.0+-black?style=flat&logo=flask)
